@@ -103,3 +103,52 @@ as it has headroom**; between 70,000 and 100,000 users on this box it stops keep
 plus the old generation of ~100,000 connections, and no setting tried (heap, threads, old-generation triggers,
 tenuring) moved that limit without starving the application. ZGC handled 100,000 without a stall, and at 70,000 its
 tail is still 2-5× better.
+
+## Ron Pressler's view, and where this data agrees
+
+Ron Pressler (Java architect, Oracle) gave two talks in 2026 on why the JDK's collectors work the way they do:
+[Principles of Memory Management in Java](https://www.youtube.com/watch?v=xr73mR7ii9M) (JavaOne, March 2026) and its
+sequel [Big Runtimes Make Efficient Programs](https://www.youtube.com/watch?v=vhDwy1eCXbs) (Devoxx Belgium, 2026),
+plus the keynote [Java – The Year of the Runtime!](https://www.youtube.com/watch?v=fXBGBovpH88). Read from the
+YouTube captions, his points are:
+
+1. **Moving, generational collectors turn RAM into less CPU.** Collection cost is roughly live set × allocation rate
+   / headroom; generations make the two terms add instead of multiply, so more headroom pays for a higher allocation
+   rate. "RAM chips become hardware accelerators."
+2. **Think in RAM per core.** Every machine you can buy has at least ~1 GB per core; a program at 100% CPU holds all
+   of it anyway, so unused RAM saves nothing. Always set the heap size (the 25% default "is almost never what you
+   want"); automatic heap sizing for ZGC is coming.
+3. **ZGC removed GC pauses.** Go's non-moving collector is "primitive", and Go programs hit problems Java had ten years
+   ago.
+4. **Benchmarks do not generalize.** A result holds only if your whole program is the benchmark; most benchmarks use
+   too much CPU and too little RAM.
+5. **Allocate naturally, don't pool objects.** Pooled objects get promoted, and writing references into old objects
+   costs barrier work. Pooling sockets or connections is fine.
+
+**Where this data agrees:**
+
+- ZGC has no pauses that matter here: at 100,000 users, p99.9 110 ms, no allocation stalls, no request over 1 s.
+  Parallel's full collections (up to 1.7 s) are what fail it.
+- The submission sets the heap explicitly (45% next to Postgres, with `AlwaysPreTouch`); 45% is a split with
+  Postgres's cache on the same box, not RAM frugality.
+- It pools only connections and Postgres sessions, the exception he allows.
+
+**Where it adds a caveat:**
+
+- **His cost model leaves out the barriers in the application's own code.** Headroom makes collections rarer; it
+  does not remove barrier work. On the challenge's own score (CPU saturated), ZGC needs ~12% more CPU per request
+  than Parallel and G1 4-7% more, at 45% and at 60% heap alike, so Parallel wins there at every heap size tried.
+- **Objects that live for minutes break the "small old-generation allocation" assumption.** Here each connection's
+  state lives minutes, is promoted, then dies. Generational Shenandoah collapsed on exactly that; ZGC coped, but at
+  4.67 cores against Parallel's 3.28 (+42%), part of it marking ~3.5 GB of live connection state.
+- **"Benchmarks are useless" applies to the challenge too.** It is a whole program with a realistic request mix, but
+  its score runs the CPU to saturation, the unnatural mix he warns about. This variant (~60% CPU, a big changing live
+  set, a tail score) is closer to the programs he means, and there his conclusion holds: ZGC first.
+- **His Rust comparison** (Caffeine with ZGC beat the Rust cache Moka, which spent ~40% CPU deciding when to free) is
+  an in-process concurrent cache, and he says himself it does not generalize. This server keeps its state in
+  Postgres, and per-request allocations are cheap for jemalloc/mimalloc, so a Rust server may still match or beat ZGC
+  on this tail. Not measured.
+
+**Net:** for the services Java is built for (spare CPU, latency targets, a big live set), ZGC with enough heap is the
+right default, as he says. A score that runs the CPU to 100% and only checks p99 rewards the opposite trade (no
+barriers, occasional long pauses), which is why Parallel wins the challenge as specified.
