@@ -112,5 +112,33 @@ generator ([`bench/cmd/loadgen`](bench/cmd/loadgen)) on separate machines. A vir
 **Your score is the most users that pass a 5-minute hold** with p95 under 500 ms, p99 under 1 s and under 1% errors.
 A run where a load generator, not your server, is the limit doesn't count: I add load capacity and run it again.
 
+### Tail-latency track
+
+A second, separate leaderboard. Same rules, same box, same server, same search; only the users and the pass criteria
+change. Run it with `loadgen search -track tail`.
+
+The standard track asks "how many users before the CPU runs out?" The tail track asks "how many users before **any**
+user waits too long?" A single long pause (a stop-the-world garbage collection, a lock convoy, a checkpoint stall)
+hides in the last 1% of a 5-minute run, but not here.
+
+- **Slower users**: think time and session length are **5×** the standard ones. For the same req/s, there are 5× more
+  users, each with its own open keep-alive connection. Your server holds far more connections, and that state
+  changes as users come and go.
+- **Pass criteria**, over all requests in the window:
+  - **p99 < 250 ms**,
+  - **p99.9 < 500 ms**,
+  - **slowest request < 2 s**, and
+  - **errors < 0.1%**.
+- **Longer windows**: 3-minute probes (60 s ramp + 3 min measured) and a **10-minute hold** (60 s ramp + 10 min
+  measured).
+
+**Your tail-track score is the most users that pass a 10-minute hold** with these criteria. The LG-limited rule is the
+same. One client IP can open only ~28,000 connections to one server address, so on this track I spread the load over
+several target addresses (`-target-url` takes a comma-separated list).
+
+You can submit one server to both tracks. A runtime setting that wins one track can lose the other (for example, a
+throughput-first garbage collector against a low-pause one), so `start.sh` may read `$CONDUIT_TRACK` (`standard` or
+`tail`), which the switch script sets.
+
 **After your pull request is merged**, it waits for the next benchmark batch. I run merged submissions in batches,
 not one at a time, on no fixed schedule, and share the results once a batch is done.

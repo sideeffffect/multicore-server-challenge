@@ -208,3 +208,52 @@ func TestStatLine(t *testing.T) {
 		t.Fatal(b, tot)
 	}
 }
+
+func TestTailTrack(t *testing.T) {
+	mk := func(track string, lats ...time.Duration) *BoxResult {
+		h := newHist()
+		for _, lat := range lats {
+			recordUs(h, lat)
+		}
+		c := 20.0
+		n := int64(len(lats))
+		return &BoxResult{Meta: RunMeta{Users: 10, MeasureS: 10, RampS: 1, Track: track}, Box: BoxStats{CPUAvg: &c},
+			Endpoints: map[string]*EndpointResult{"GET /api/tags": {Count: n, Hist: encodeHist(h), Statuses: map[string]int64{"200": n}}}}
+	}
+	fast := make([]time.Duration, 2000)
+	for i := range fast {
+		fast[i] = 10 * time.Millisecond
+	}
+	// One 3-second request in 2,000: the standard track does not see it, the tail track fails on max.
+	slow := append(append([]time.Duration{}, fast[1:]...), 3*time.Second)
+	if m := mergeResults([]*BoxResult{mk("", slow...)}); !m.Verdict.Pass || m.Track != "standard" {
+		t.Fatalf("standard: %+v", m.Verdict)
+	}
+	if m := mergeResults([]*BoxResult{mk("tail", fast...)}); !m.Verdict.Pass || m.Track != "tail" {
+		t.Fatalf("tail, fast: %+v", m.Verdict)
+	}
+	if m := mergeResults([]*BoxResult{mk("tail", slow...)}); m.Verdict.Pass {
+		t.Fatalf("tail, one slow request: %+v", m.Verdict)
+	}
+	// p99.9: 5 requests in 2,000 at 700 ms (0.25%) pass p99 < 250 ms but fail p99.9 < 500 ms.
+	mid := append([]time.Duration{}, fast...)
+	for i := 0; i < 5; i++ {
+		mid[i] = 700 * time.Millisecond
+	}
+	if m := mergeResults([]*BoxResult{mk("tail", mid...)}); m.Verdict.Pass {
+		t.Fatalf("tail, p99.9: %+v", m.Verdict)
+	}
+	// Boxes on different tracks never pass.
+	if m := mergeResults([]*BoxResult{mk("tail", fast...), mk("standard", fast...)}); m.Verdict.Pass {
+		t.Fatalf("mixed tracks: %+v", m.Verdict)
+	}
+	if _, err := trackNamed("nope"); err == nil {
+		t.Fatal("unknown track accepted")
+	}
+	if c := tracks["standard"].criteria(); c != "p95 < 500 ms, p99 < 1000 ms, errors < 1%" {
+		t.Fatal(c)
+	}
+	if c := tracks["tail"].criteria(); c != "p99 < 250 ms, p99.9 < 500 ms, max < 2000 ms, errors < 0.1%" {
+		t.Fatal(c)
+	}
+}

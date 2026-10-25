@@ -53,7 +53,8 @@ loadgen run -target http://10.0.0.2 -users 4000 -box-index 0 -id-offset 0 \
 | `-secret` | the target's `JWT_SECRET` (or `$CONDUIT_JWT_SECRET`) |
 | `-run-id` | must differ between runs on the same database (it's part of sign-up usernames) |
 | `-articles` | seeded article count for deep links (500000; **10000 for the local dev DB**) |
-| `-think-scale` | **testing only**: multiplies think times *and* session lengths (default 1.0) |
+| `-track` | scoring track: `standard` (default) or `tail` (5× think time and session length, tail criteria; README.md, "Tail-latency track") |
+| `-think-scale` | **testing only**: multiplies think times *and* session lengths (default: the track's pace, 1 or 5) |
 | `-q` | don't print the summary table to stderr |
 
 The output JSON has:
@@ -84,7 +85,9 @@ Merges histograms, counts and timelines exactly. It gives each endpoint and over
 measure window), p50/p90/p95/p99/max/mean and error rate. It also gives the request mix (calls per page view,
 req/s per user, write %, page shares), the verdict, and a table:
 
-- **PASS** iff overall p95 < 500 ms, p99 < 1000 ms and errors < 1%.
+- **PASS**, on the standard track, iff overall p95 < 500 ms, p99 < 1000 ms and errors < 1%; on the tail track, iff
+  p99 < 250 ms, p99.9 < 500 ms, max < 2000 ms and errors < 0.1%. The track comes from the boxes' `meta.track`; boxes
+  on different tracks never pass.
 - **`lg_limited`** if any box's average CPU over the window is above 75%, or any box `fell_behind`.
 
 ### `loadgen search` (the orchestrator I score with; needs root ssh to the box and the load boxes)
@@ -97,6 +100,9 @@ loadgen search -target-ssh root@10.0.0.2 -lang go -outdir results/go
 
 Defaults: `-target-url http://<target-ssh host>`, `-boxes local=1` (e.g. `root@10.0.0.3=4,root@10.0.0.4=4,local=8`),
 `-ssh-key ""` (ssh's default identity), `-start 500`, `-max 120000`, `-resolution 0.05`.
+`-track tail` switches the pace, the criteria and the default `-probe-measure` / `-hold-measure` (3 min / 10 min)
+and passes `-track` to every box; set `-target-url` to several comma-separated addresses so no box runs out of
+source ports.
 
 1. Preflight. ssh to the target (also reads its timezone) and to each load box. The binary copies itself to
    `-remote-bin` (`/usr/local/bin/conduit-loadgen`) wherever the sha256 differs.

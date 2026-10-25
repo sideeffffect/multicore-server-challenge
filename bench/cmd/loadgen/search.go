@@ -50,6 +50,7 @@ type searcher struct {
 	articles                                  int
 	idleCPU                                   float64
 	thinkScale                                float64
+	track                                     track
 	tzOffset                                  time.Duration
 	log                                       io.Writer
 	logf                                      *os.File
@@ -108,9 +109,26 @@ func cmdSearch(args []string) int {
 	fs.Float64Var(&s.idleCPU, "idle-cpu", 15, "between phases, wait until the target's CPU is below this %")
 	fs.DurationVar(&s.idleMax, "idle-max", 90*time.Second, "longest wait for the target to go idle between phases (after a fixed 5 s)")
 	fs.BoolVar(&s.dry, "dry", false, "print the plan only")
-	fs.Float64Var(&s.thinkScale, "think-scale", 1.0, "TESTING ONLY: passed to every box")
+	trackName := fs.String("track", "standard", "scoring track: standard, or tail (README.md, \"Tail-latency track\"); sets the pace, the pass criteria and the default probe/hold windows")
+	fs.Float64Var(&s.thinkScale, "think-scale", 0, "TESTING ONLY: passed to every box (default: the track's pace)")
 	extra := fs.String("extra-ssh", "", "more boxes of the target as name=user@host,... (monitored and idle-checked like the target)")
 	fs.Parse(args)
+	var err error
+	if s.track, err = trackNamed(*trackName); err != nil {
+		fmt.Fprintln(os.Stderr, "search:", err)
+		return 2
+	}
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	if !set["think-scale"] {
+		s.thinkScale = s.track.thinkScale
+	}
+	if !set["probe-measure"] {
+		s.probeMeasure = s.track.probeMeasure
+	}
+	if !set["hold-measure"] {
+		s.holdMeasure = s.track.holdMeasure
+	}
 	for _, kv := range strings.Split(*extra, ",") {
 		if kv = strings.TrimSpace(kv); kv == "" {
 			continue
@@ -123,7 +141,6 @@ func cmdSearch(args []string) int {
 		s.extras = append(s.extras, extraHost{name, host})
 	}
 
-	var err error
 	if s.boxes, err = parseBoxes(*boxes); err != nil {
 		fmt.Fprintln(os.Stderr, "search:", err)
 		return 2
@@ -238,7 +255,7 @@ func (s *searcher) plan() {
 	}
 	fmt.Println()
 	if !s.noSwitch {
-		fmt.Printf("1. on %s: %s %s  (fresh DB, caches dropped, app started)\n", s.targetSSH, s.switchCmd, s.lang)
+		fmt.Printf("1. on %s: CONDUIT_TRACK=%s %s %s  (fresh DB, caches dropped, app started)\n", s.targetSSH, s.track.name, s.switchCmd, s.lang)
 	}
 	if s.monitorCmd != "" {
 		fmt.Printf("   each phase: %s 1 %s-<phase> on the target (cwd %s), CSV fetched afterwards\n", s.monitorCmd, s.label, s.monitorDir)
@@ -261,8 +278,8 @@ func (s *searcher) plan() {
 		}
 	}
 	fmt.Printf("\n   ... until one fails, then bisect to %.0f%% (rounded to 2 significant digits)\n", 100*s.resolution)
-	fmt.Printf("   pass = p95 < %d ms, p99 < %d ms, errors < %.0f%%; any box CPU > %d%% or falling behind = LG-limited (stop)\n",
-		passP95Ms, passP99Ms, 100*passErrRate, lgCPULimitPct)
+	fmt.Printf("   pass (%s track, pace x%g) = %s; any box CPU > %d%% or falling behind = LG-limited (stop)\n",
+		s.track.name, s.thinkScale, s.track.criteria(), lgCPULimitPct)
 	fmt.Printf("4. holds: %v ramp + %v measured at the highest passing probe, stepping down %.0f%% until one passes = score\n",
 		s.holdRamp, s.holdMeasure, 100*s.resolution)
 	fmt.Printf("between phases: wait >= 5 s and until target CPU < %.0f%% (max %v); no DB reset between phases\n", s.idleCPU, s.idleMax)
@@ -336,8 +353,8 @@ func (s *searcher) runSearch() error {
 		if _, err := os.Stat(marker); err == nil {
 			s.logln("switch already done (%s exists): resuming without a DB reset", marker)
 		} else {
-			s.logln("switch: %s %s", s.switchCmd, s.lang)
-			out, err := s.sshOut(s.targetSSH, s.switchCmd+" "+shq(s.lang)+" 2>&1")
+			s.logln("switch: CONDUIT_TRACK=%s %s %s", s.track.name, s.switchCmd, s.lang)
+			out, err := s.sshOut(s.targetSSH, "CONDUIT_TRACK="+s.track.name+" "+s.switchCmd+" "+shq(s.lang)+" 2>&1")
 			os.WriteFile(filepath.Join(s.outdir, "switch.log"), []byte(out), 0o644)
 			if err != nil {
 				return fmt.Errorf("switch failed (see switch.log): %v", err)
@@ -514,7 +531,8 @@ func firstField(f []string, i int) string {
 func (s *searcher) boxArgs(i, users, idOffset int, t0 time.Time, ramp, measure time.Duration, runID, out string) []string {
 	return []string{"-target", s.targetURL, "-users", strconv.Itoa(users), "-box-index", strconv.Itoa(i), "-id-offset", strconv.Itoa(idOffset),
 		"-ramp", ramp.String(), "-measure", measure.String(), "-tail", s.tail.String(), "-start-at", strconv.FormatInt(t0.UnixMilli(), 10),
-		"-run-id", runID, "-articles", strconv.Itoa(s.articles), "-think-scale", strconv.FormatFloat(s.thinkScale, 'g', -1, 64), "-out", out, "-q"}
+		"-run-id", runID, "-articles", strconv.Itoa(s.articles), "-track", s.track.name,
+		"-think-scale", strconv.FormatFloat(s.thinkScale, 'g', -1, 64), "-out", out, "-q"}
 }
 
 // waitIdle waits at least 5 s, then until the target's CPU is below -idle-cpu (max 90 s).

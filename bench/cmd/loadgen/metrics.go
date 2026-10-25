@@ -304,6 +304,7 @@ type RunMeta struct {
 	RampS        float64 `json:"ramp_s"`
 	MeasureS     float64 `json:"measure_s"`
 	TailS        float64 `json:"tail_s"`
+	Track        string  `json:"track"`
 	ThinkScale   float64 `json:"think_scale"`
 	Articles     int     `json:"articles"`
 	NCPU         int     `json:"ncpu"`

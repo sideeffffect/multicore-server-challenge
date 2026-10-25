@@ -13,6 +13,7 @@ Your server reads its config from these environment variables:
 | `DATABASE_URL` | `postgres://conduit:conduit@127.0.0.1:5432/conduit`: a fresh copy of the seed database |
 | `JWT_SECRET` | `multicore-server-challenge` |
 | `HOST`, `PORT` | `127.0.0.1`, `3000` behind Nginx; `0.0.0.0`, `80` if you serve directly |
+| `CONDUIT_TRACK` | `standard`, or `tail` on the tail-latency track (README.md); optional to read |
 
 Listen on `HOST:PORT` and speak HTTP/1.1 with keep-alive. Compression is optional (Nginx gzips JSON over 1 KB if you use it).
 

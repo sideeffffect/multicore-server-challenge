@@ -4,6 +4,7 @@
 #
 #   switch.sh rust-hyper-cknutson12                  # conformance on the full seed, then a fresh DB and start
 #   switch.sh rust-hyper-cknutson12 --no-conformance
+#   CONDUIT_TRACK=tail switch.sh rust-hyper-cknutson12   # tail-latency track (README.md); start.sh sees $CONDUIT_TRACK
 #
 # The submission must already be in /opt/challenge/subs/<name>, installed and built (score/prepare.sh).
 # Steps: stop challenge.service -> Front from the README (nginx: Nginx on :80 -> app on 127.0.0.1:3000;
@@ -17,6 +18,8 @@ SUB="/opt/challenge/subs/$NAME"
 UNIT=challenge.service
 CONF_BIN=/opt/conduit-tools/conformance
 JWT_SECRET=multicore-server-challenge
+TRACK="${CONDUIT_TRACK:-standard}"
+case "$TRACK" in standard|tail) ;; *) echo "unknown CONDUIT_TRACK=$TRACK (standard or tail)"; exit 1 ;; esac
 say() { printf '[switch %s %s] %s\n' "$NAME" "$(date +%T)" "$*"; }
 [ -f "$SUB/start.sh" ] || { echo "no $SUB/start.sh (score/prepare.sh $NAME first)"; exit 1; }
 [ -f "$SUB/.built" ] || { echo "$SUB not built (score/prepare.sh $NAME first)"; exit 1; }
@@ -69,6 +72,7 @@ umask 027
   echo "JWT_SECRET=$JWT_SECRET"
   echo "HOST=$HOST"
   echo "PORT=$PORT"
+  echo "CONDUIT_TRACK=$TRACK"
 } > /etc/challenge/env.new
 chgrp challenge /etc/challenge/env.new && mv /etc/challenge/env.new /etc/challenge/env
 umask 022

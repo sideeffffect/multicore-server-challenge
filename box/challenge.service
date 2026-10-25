@@ -1,7 +1,7 @@
 # /etc/systemd/system/challenge.service: how your server runs on the benchmark box.
 #
 # /opt/challenge/current is a symlink to your submission folder, built there by `challenge` with build.sh.
-# /etc/challenge/env holds DATABASE_URL, JWT_SECRET, HOST and PORT (SPEC.md, "Runtime contract").
+# /etc/challenge/env holds DATABASE_URL, JWT_SECRET, HOST, PORT and CONDUIT_TRACK (SPEC.md, "Runtime contract").
 # Restart=no on purpose: a crash during a run shows up as errors in the results. No CPU or memory limits.
 [Unit]
 Description=Multicore server challenge submission

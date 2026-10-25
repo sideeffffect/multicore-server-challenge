@@ -13,13 +13,8 @@ import (
 	hdr "github.com/HdrHistogram/hdrhistogram-go"
 )
 
-// Pass/fail thresholds (DESIGN.md) and the load-box CPU limit.
-const (
-	passP95Ms     = 500
-	passP99Ms     = 1000
-	passErrRate   = 0.01
-	lgCPULimitPct = 75
-)
+// The load-box CPU limit. The pass/fail thresholds depend on the track (track.go).
+const lgCPULimitPct = 75
 
 type Stats struct {
 	Count        int64            `json:"count"`
@@ -28,6 +23,7 @@ type Stats struct {
 	P90Ms        float64          `json:"p90_ms"`
 	P95Ms        float64          `json:"p95_ms"`
 	P99Ms        float64          `json:"p99_ms"`
+	P999Ms       float64          `json:"p999_ms"`
 	MaxMs        float64          `json:"max_ms"`
 	MeanMs       float64          `json:"mean_ms"`
 	Errors       int64            `json:"errors"`
@@ -86,6 +82,7 @@ type MergedSecond struct {
 }
 
 type Merged struct {
+	Track     string          `json:"track"`
 	Users     int             `json:"users"`
 	RunIDs    []string        `json:"run_ids"`
 	Target    string          `json:"target"`
@@ -153,7 +150,7 @@ func statsOf(h *hdr.Histogram, windowS float64) Stats {
 		return s
 	}
 	ms := func(q float64) float64 { return float64(h.ValueAtQuantile(q)) / 1000 }
-	s.P50Ms, s.P90Ms, s.P95Ms, s.P99Ms = ms(50), ms(90), ms(95), ms(99)
+	s.P50Ms, s.P90Ms, s.P95Ms, s.P99Ms, s.P999Ms = ms(50), ms(90), ms(95), ms(99), ms(99.9)
 	s.MaxMs = float64(h.Max()) / 1000
 	s.MeanMs = h.Mean() / 1000
 	if windowS > 0 {
@@ -169,6 +166,10 @@ func mergeResults(rs []*BoxResult) *Merged {
 	}
 	base := rs[0].Meta
 	m.StartAtMs, m.RampS, m.WindowS, m.Target = base.StartAtMs, base.RampS, base.MeasureS, base.Target
+	m.Track = base.Track
+	if m.Track == "" {
+		m.Track = "standard" // results from before tracks existed
+	}
 	overall := newHist()
 	eps := map[string]*hdr.Histogram{}
 	epStats := map[string]*Stats{}
@@ -306,15 +307,17 @@ func mergeResults(rs []*BoxResult) *Merged {
 	if o.Count == 0 {
 		v.Reasons = append(v.Reasons, "no requests in the measure window")
 	}
-	if o.P95Ms >= passP95Ms {
-		v.Reasons = append(v.Reasons, fmt.Sprintf("p95 %.0f ms >= %d", o.P95Ms, passP95Ms))
+	tr, err := trackNamed(m.Track)
+	if err != nil {
+		v.Reasons = append(v.Reasons, err.Error())
 	}
-	if o.P99Ms >= passP99Ms {
-		v.Reasons = append(v.Reasons, fmt.Sprintf("p99 %.0f ms >= %d", o.P99Ms, passP99Ms))
+	for _, r := range rs[1:] {
+		if r.Meta.Track != rs[0].Meta.Track {
+			v.Reasons = append(v.Reasons, fmt.Sprintf("boxes ran different tracks (%q, %q)", rs[0].Meta.Track, r.Meta.Track))
+			break
+		}
 	}
-	if o.ErrorRate >= passErrRate {
-		v.Reasons = append(v.Reasons, fmt.Sprintf("errors %.2f%% >= %.0f%%", 100*o.ErrorRate, 100*passErrRate))
-	}
+	v.Reasons = append(v.Reasons, tr.failures(o)...)
 	v.Pass = len(v.Reasons) == 0
 	for _, b := range m.Boxes {
 		if b.CPUAvg != nil && *b.CPUAvg > lgCPULimitPct {
@@ -358,11 +361,16 @@ func printMerged(w io.Writer, m *Merged) {
 		fmt.Fprintf(w, "box %d (%s): %d users, CPU avg %s max %s, loadgen proc %.0f%%, RSS peak %.0f MB, %d TCP connects, behind=%v\n",
 			b.Index, b.Host, b.Users, fmtPct(b.CPUAvg), fmtPct(b.CPUMax), b.ProcCPUAvg, b.RSSPeakMB, b.Dials, b.Behind)
 	}
+	fmt.Fprintf(w, "tail: p99.9 %.1f ms, max %.0f ms\n", m.Overall.P999Ms, m.Overall.MaxMs)
 	verdict := "PASS"
 	if !m.Verdict.Pass {
 		verdict = "FAIL (" + strings.Join(m.Verdict.Reasons, ", ") + ")"
 	}
-	fmt.Fprintf(w, "verdict: %s   [p95 < %d ms, p99 < %d ms, errors < %.0f%%]\n", verdict, passP95Ms, passP99Ms, 100*passErrRate)
+	criteria := "unknown track"
+	if tr, err := trackNamed(m.Track); err == nil {
+		criteria = tr.name + " track: " + tr.criteria()
+	}
+	fmt.Fprintf(w, "verdict: %s   [%s]\n", verdict, criteria)
 	if m.Verdict.LGLimited {
 		fmt.Fprintf(w, "LG-LIMITED: %s\n", strings.Join(m.Verdict.LGReasons, "; "))
 	} else {

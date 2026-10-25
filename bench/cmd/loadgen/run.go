@@ -32,7 +32,8 @@ func cmdRun(args []string) int {
 	runID := fs.String("run-id", "", "run id (part of sign-up usernames, so it must differ between runs on the same database)")
 	out := fs.String("out", "results.json", "results JSON path ('-' = stdout)")
 	articles := fs.Int("articles", seed.NArticles, "number of seeded articles (deep links pick ids 1..N); 10000 for the dev DB")
-	thinkScale := fs.Float64("think-scale", 1.0, "TESTING ONLY: multiply think times and session lengths")
+	trackName := fs.String("track", "standard", "scoring track: standard, or tail (README.md, \"Tail-latency track\"): sets the users' pace and the pass criteria")
+	thinkScale := fs.Float64("think-scale", 0, "TESTING ONLY: multiply think times and session lengths (default: the track's pace)")
 	quiet := fs.Bool("q", false, "don't print the summary table")
 	fs.Parse(args)
 
@@ -40,7 +41,15 @@ func cmdRun(args []string) int {
 		fmt.Fprintln(os.Stderr, "run: -secret (or $CONDUIT_JWT_SECRET) is required")
 		return 2
 	}
-	cfg := runConfig{target: *target, users: *users, box: *box, idOffset: *idOffset, ramp: *ramp, measure: *measure, tail: *tail,
+	tr, err := trackNamed(*trackName)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "run:", err)
+		return 2
+	}
+	if *thinkScale == 0 {
+		*thinkScale = tr.thinkScale
+	}
+	cfg := runConfig{track: tr.name, target: *target, users: *users, box: *box, idOffset: *idOffset, ramp: *ramp, measure: *measure, tail: *tail,
 		secret: *secret, runID: *runID, articles: *articles, thinkScale: *thinkScale, t0: time.Now().Add(2 * time.Second)}
 	if *startAt > 0 {
 		cfg.t0 = time.UnixMilli(*startAt)
@@ -62,6 +71,7 @@ func cmdRun(args []string) int {
 }
 
 type runConfig struct {
+	track                string
 	target               string
 	users, box, idOffset int
 	ramp, measure, tail  time.Duration
@@ -91,10 +101,10 @@ func runBox(c runConfig) (*BoxResult, error) {
 	host, _ := os.Hostname()
 	meta := RunMeta{Version: version, RunID: c.runID, Target: c.target, Host: host, BoxIndex: c.box, Users: c.users,
 		IDOffset: c.idOffset, StartAtMs: t0.UnixMilli(), RampS: c.ramp.Seconds(), MeasureS: c.measure.Seconds(), TailS: c.tail.Seconds(),
-		ThinkScale: c.thinkScale, Articles: c.articles, NCPU: runtime.NumCPU(), GOMAXPROCS: runtime.GOMAXPROCS(0),
+		Track: c.track, ThinkScale: c.thinkScale, Articles: c.articles, NCPU: runtime.NumCPU(), GOMAXPROCS: runtime.GOMAXPROCS(0),
 		WindowStart: rec.winStart.UnixMilli(), WindowEnd: rec.winEnd.UnixMilli()}
-	fmt.Fprintf(os.Stderr, "run %s: box %d, %d users -> %s, start %s, ramp %v + measure %v + tail %v\n",
-		c.runID, c.box, c.users, c.target, t0.Format("15:04:05.000"), c.ramp, c.measure, c.tail)
+	fmt.Fprintf(os.Stderr, "run %s: box %d, %d users -> %s, %s track (pace x%g), start %s, ramp %v + measure %v + tail %v\n",
+		c.runID, c.box, c.users, c.target, c.track, c.thinkScale, t0.Format("15:04:05.000"), c.ramp, c.measure, c.tail)
 
 	h := fnv.New64a()
 	h.Write([]byte(c.runID + "/" + strconv.Itoa(c.box)))
