@@ -86,7 +86,7 @@ measure window), p50/p90/p95/p99/max/mean and error rate. It also gives the requ
 req/s per user, write %, page shares), the verdict, and a table:
 
 - **PASS**, on the standard track, iff overall p95 < 500 ms, p99 < 1000 ms and errors < 1%; on the tail track, iff
-  p99 < 250 ms, p99.9 < 500 ms, max < 2000 ms and errors < 0.1%. The track comes from the boxes' `meta.track`; boxes
+  p99 < 250 ms, p99.9 < 500 ms, p99.99 < 1000 ms and errors < 0.1% (p99.999 is printed, not judged). The track comes from the boxes' `meta.track`; boxes
   on different tracks never pass.
 - **`lg_limited`** if any box's average CPU over the window is above 75%, or any box `fell_behind`.
 

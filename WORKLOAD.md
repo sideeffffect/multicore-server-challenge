@@ -88,13 +88,13 @@ These are judged over all requests combined; per-endpoint figures are reported a
 
 **Tail-latency track** (`-track tail`, see README.md): the same virtual user at **5×** think time and session
 length (so 5× the users per req/s, each holding a connection). A run passes when **p99 < 250 ms**, **p99.9 < 500 ms**,
-the **slowest request < 2 s** and **errors < 0.1%**. Probes measure 3 minutes, the hold 10 minutes; everything else
+**p99.99 < 1 s** and **errors < 0.1%**. Probes measure 3 minutes, the hold 10 minutes; everything else
 is as above.
 
 **Recorded per run:**
 - users
 - req/s
-- p50/p95/p99 per endpoint (plus overall p99.9 and max)
+- p50/p95/p99 per endpoint (plus overall p99.9, p99.99 and p99.999)
 - error breakdown
 - target CPU split into nginx / app / postgres
 - steal %

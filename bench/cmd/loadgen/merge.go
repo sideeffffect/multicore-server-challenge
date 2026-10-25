@@ -24,6 +24,8 @@ type Stats struct {
 	P95Ms        float64          `json:"p95_ms"`
 	P99Ms        float64          `json:"p99_ms"`
 	P999Ms       float64          `json:"p999_ms"`
+	P9999Ms      float64          `json:"p9999_ms"`
+	P99999Ms     float64          `json:"p99999_ms"`
 	MaxMs        float64          `json:"max_ms"`
 	MeanMs       float64          `json:"mean_ms"`
 	Errors       int64            `json:"errors"`
@@ -151,6 +153,7 @@ func statsOf(h *hdr.Histogram, windowS float64) Stats {
 	}
 	ms := func(q float64) float64 { return float64(h.ValueAtQuantile(q)) / 1000 }
 	s.P50Ms, s.P90Ms, s.P95Ms, s.P99Ms, s.P999Ms = ms(50), ms(90), ms(95), ms(99), ms(99.9)
+	s.P9999Ms, s.P99999Ms = ms(99.99), ms(99.999)
 	s.MaxMs = float64(h.Max()) / 1000
 	s.MeanMs = h.Mean() / 1000
 	if windowS > 0 {
@@ -361,7 +364,7 @@ func printMerged(w io.Writer, m *Merged) {
 		fmt.Fprintf(w, "box %d (%s): %d users, CPU avg %s max %s, loadgen proc %.0f%%, RSS peak %.0f MB, %d TCP connects, behind=%v\n",
 			b.Index, b.Host, b.Users, fmtPct(b.CPUAvg), fmtPct(b.CPUMax), b.ProcCPUAvg, b.RSSPeakMB, b.Dials, b.Behind)
 	}
-	fmt.Fprintf(w, "tail: p99.9 %.1f ms, max %.0f ms\n", m.Overall.P999Ms, m.Overall.MaxMs)
+	fmt.Fprintf(w, "tail: p99.9 %.1f ms, p99.99 %.1f ms, p99.999 %.1f ms\n", m.Overall.P999Ms, m.Overall.P9999Ms, m.Overall.P99999Ms)
 	verdict := "PASS"
 	if !m.Verdict.Pass {
 		verdict = "FAIL (" + strings.Join(m.Verdict.Reasons, ", ") + ")"

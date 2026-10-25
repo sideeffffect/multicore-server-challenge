@@ -127,8 +127,12 @@ hides in the last 1% of a 5-minute run, but not here.
 - **Pass criteria**, over all requests in the window:
   - **p99 < 250 ms**,
   - **p99.9 < 500 ms**,
-  - **slowest request < 2 s**, and
+  - **p99.99 < 1 s**, and
   - **errors < 0.1%**.
+
+  Why p99.99 and not the slowest request: a stop-the-world pause delays every request in flight at once, so a single
+  pause longer than ~1.06 s fails a 10-minute hold (0.01% of 10 minutes is 60 ms). One request delayed by something
+  outside your server (a retransmitted SYN, a network hiccup) doesn't. p99.999 is reported, not judged.
 - **Longer windows**: 3-minute probes (60 s ramp + 3 min measured) and a **10-minute hold** (60 s ramp + 10 min
   measured).
 

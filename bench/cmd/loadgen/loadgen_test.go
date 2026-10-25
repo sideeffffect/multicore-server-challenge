@@ -220,24 +220,34 @@ func TestTailTrack(t *testing.T) {
 		return &BoxResult{Meta: RunMeta{Users: 10, MeasureS: 10, RampS: 1, Track: track}, Box: BoxStats{CPUAvg: &c},
 			Endpoints: map[string]*EndpointResult{"GET /api/tags": {Count: n, Hist: encodeHist(h), Statuses: map[string]int64{"200": n}}}}
 	}
-	fast := make([]time.Duration, 2000)
+	fast := make([]time.Duration, 100000)
 	for i := range fast {
 		fast[i] = 10 * time.Millisecond
 	}
-	// One 3-second request in 2,000: the standard track does not see it, the tail track fails on max.
-	slow := append(append([]time.Duration{}, fast[1:]...), 3*time.Second)
-	if m := mergeResults([]*BoxResult{mk("", slow...)}); !m.Verdict.Pass || m.Track != "standard" {
-		t.Fatalf("standard: %+v", m.Verdict)
+	withSlow := func(n int) []time.Duration {
+		r := append([]time.Duration{}, fast...)
+		for i := 0; i < n; i++ {
+			r[i] = 3 * time.Second
+		}
+		return r
 	}
 	if m := mergeResults([]*BoxResult{mk("tail", fast...)}); !m.Verdict.Pass || m.Track != "tail" {
 		t.Fatalf("tail, fast: %+v", m.Verdict)
 	}
-	if m := mergeResults([]*BoxResult{mk("tail", slow...)}); m.Verdict.Pass {
-		t.Fatalf("tail, one slow request: %+v", m.Verdict)
+	// 5 requests of 3 s in 100,000 (0.005%, isolated outliers) pass p99.99 < 1 s.
+	if m := mergeResults([]*BoxResult{mk("tail", withSlow(5)...)}); !m.Verdict.Pass {
+		t.Fatalf("tail, 5 outliers: %+v", m.Verdict)
 	}
-	// p99.9: 5 requests in 2,000 at 700 ms (0.25%) pass p99 < 250 ms but fail p99.9 < 500 ms.
+	// 50 of them (0.05%, a pause hitting everything in flight): the standard track doesn't see it, the tail track fails.
+	if m := mergeResults([]*BoxResult{mk("", withSlow(50)...)}); !m.Verdict.Pass || m.Track != "standard" {
+		t.Fatalf("standard: %+v", m.Verdict)
+	}
+	if m := mergeResults([]*BoxResult{mk("tail", withSlow(50)...)}); m.Verdict.Pass {
+		t.Fatalf("tail, a pause: %+v", m.Verdict)
+	}
+	// p99.9: 250 requests in 100,000 at 700 ms (0.25%) pass p99 < 250 ms and p99.99 < 1 s but fail p99.9 < 500 ms.
 	mid := append([]time.Duration{}, fast...)
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 250; i++ {
 		mid[i] = 700 * time.Millisecond
 	}
 	if m := mergeResults([]*BoxResult{mk("tail", mid...)}); m.Verdict.Pass {
@@ -253,7 +263,7 @@ func TestTailTrack(t *testing.T) {
 	if c := tracks["standard"].criteria(); c != "p95 < 500 ms, p99 < 1000 ms, errors < 1%" {
 		t.Fatal(c)
 	}
-	if c := tracks["tail"].criteria(); c != "p99 < 250 ms, p99.9 < 500 ms, max < 2000 ms, errors < 0.1%" {
+	if c := tracks["tail"].criteria(); c != "p99 < 250 ms, p99.9 < 500 ms, p99.99 < 1000 ms, errors < 0.1%" {
 		t.Fatal(c)
 	}
 }
