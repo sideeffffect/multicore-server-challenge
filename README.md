@@ -121,6 +121,20 @@ The standard track asks "how many users before the CPU runs out?" The tail track
 user waits too long?" A single long pause (a stop-the-world garbage collection, a lock convoy, a checkpoint stall)
 hides in the last 1% of a 5-minute run, but not here.
 
+Why this track is worth having next to the standard one:
+
+- **It asks the capacity-planning question.** Production services are sized against latency targets, typically
+  p99.9 or p99.99 under some limit with a 99.9% success rate, not against the point where the CPU runs out. The
+  criteria below are targets of that kind.
+- **Its traffic arrives more like real traffic.** A virtual user waits for each response before it continues, so
+  when a server stalls, the users stop sending and the stall delays fewer requests than it would in reality. With
+  5× think time, each user rarely has a request in flight, the requests arrive almost independently of each other,
+  as they do from many people on the internet, and a stall is counted closer to its real cost.
+- **Its users read at a human pace.** About 35 s between pages is closer to how long people spend on a page than the
+  standard track's ~7 s.
+
+It is still a benchmark: it measures one more question, not a more realistic workload overall.
+
 - **Slower users**: think time and session length are **5×** the standard ones. For the same req/s, there are 5× more
   users, each with its own open keep-alive connection. Your server holds far more connections, and that state
   changes as users come and go.
